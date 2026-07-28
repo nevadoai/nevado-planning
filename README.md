@@ -29,7 +29,7 @@ nevado-planning/
 | Roadmap | `roadmap/` docs | Strategic themes and timelines |
 | Epic | Issue in this repo (type: Epic) | "Session Handoff" |
 | Milestone | Per-repo milestone matching the epic | `sherpa-sdk` milestone "Session Handoff" |
-| Story/Task | Issue in implementation repo | `sherpa-sdk#55` |
+| Task | Issue in implementation repo | `sherpa-sdk#55` |
 
 ### Epics
 
@@ -66,27 +66,92 @@ Longer-form technical documents for significant features or system-level archite
 | `nevado-sherpa-ide` | VS Code extension |
 | `command-center` | Web app, backend, infrastructure |
 | `nevado-customer-provisioner` | Customer AWS account provisioning |
+| `compliance` | Compliance program, control evidence, audit readiness |
+
+## When to Use What
+
+| Concept | Mechanism | Why |
+|---------|-----------|-----|
+| **Urgency** | Project board → Priority field (P0–P3) | Single source of truth; filterable in board views |
+| **Time-boxing** | Project board → Target Quarter field | Decoupled from milestones so initiatives can span quarters |
+| **Initiative grouping** | Milestone (per-repo, named after the initiative) | Built-in GitHub field; links issues to an initiative with a progress bar |
+| **Workflow state** | Project board → Status (Todo / In Progress / Done) | Built-in; drives the Kanban columns |
+| **Issue classification** | Issue Type (Epic / Task / Bug / Feature) | Built-in org-level field; no labels needed for this |
+| **Effort estimate** | Label `size:S` / `size:M` / `size:L` | No built-in equivalent; labels are visible in lists without opening the board |
+| **Initiative tag** | Label matching initiative name (e.g. `session-handoff`) | Enables cross-repo filtering by initiative in search/notifications |
+| **Owner** | Assignees field | Built-in; assign the person doing the work |
+
+### Principles
+
+1. **Prefer built-in fields over custom.** GitHub's built-in fields (Status, Milestone, Assignees, Labels, Repository, Sub-issues progress) auto-sync and work in search/filters. Only use custom project fields (Priority, Target Quarter) when no built-in covers the need.
+2. **No duplication.** Don't use labels for something a project board field already handles. Priority lives on the board — not as `priority:p0` labels.
+3. **Labels are for cross-repo filtering and categorization** that doesn't fit a project field. Keep the set small and consistent across repos.
+4. **Milestones are per-initiative, not per-quarter.** A milestone tracks all work for one initiative in one repo. Use Target Quarter on the board for time-boxing.
 
 ## Labels
 
-Shared label taxonomy across repos:
+Shared across all repos. Keep this set minimal — add a label only when no project field serves the purpose.
 
 | Label | Purpose |
 |-------|---------|
-| `priority:p0` / `p1` / `p2` | Urgency |
-| `size:S` / `M` / `L` | Effort estimate |
-| `session-handoff` | Initiative tag (one per epic) |
+| `size:S` / `size:M` / `size:L` | Effort estimate (T-shirt sizing) |
+| `<initiative-name>` (e.g. `session-handoff`) | Cross-repo initiative filter |
+| `blocked` | Issue cannot progress (explain in a comment) |
+
+Do **not** create labels for: priority (use board field), status (use board field), bug/enhancement/feature (use Issue Type field), or quarter (use board field).
 
 ## Project Board Fields
 
-| Field | Type | Purpose |
-|-------|------|---------|
-| Status | Built-in | Todo → In Progress → Done |
-| Priority | Custom (single-select) | P0, P1, P2, P3 |
-| Target Quarter | Custom (single-select) | Q3 2026, Q4 2026, Q1 2027, Q2 2027 |
-| Milestone | Built-in | Initiative grouping |
-| Repository | Built-in | Which repo the issue belongs to |
-| Sub-issues progress | Built-in | Completion percentage for epics |
+The [Nevado project board](https://github.com/orgs/nevadoai/projects/1) uses these fields:
+
+| Field | Type | Values | When to set |
+|-------|------|--------|-------------|
+| Status | Built-in | Todo → In Progress → Done | Always; move when work state changes |
+| Assignees | Built-in | GitHub users | When someone picks up the work |
+| Milestone | Built-in | Initiative name | Always; set at issue creation |
+| Labels | Built-in | See above | At creation; update if blocked |
+| Repository | Built-in | (auto) | Automatic |
+| Sub-issues progress | Built-in | (auto) | Automatic for epics with sub-issues |
+| Priority | Custom (single-select) | P0, P1, P2, P3 | Always; set at creation, reassess in triage |
+| Target Quarter | Custom (single-select) | Q3 2026, Q4 2026, Q1 2027, Q2 2027 | When the work is scheduled |
+
+### Priority Definitions
+
+| Level | Meaning | Response |
+|-------|---------|----------|
+| **P0** | System down / data loss / security | Drop everything, fix now |
+| **P1** | Major functionality broken or blocking others | This week |
+| **P2** | Important but not urgent | This quarter |
+| **P3** | Nice to have / tech debt | When capacity allows |
+
+## Working on Items
+
+When you pick up an issue:
+
+1. **Assign yourself** — so others know it's taken.
+2. **Move to In Progress** — on the project board, shift the item from Todo to In Progress.
+3. **Work on a branch** — branch from the default branch in the implementation repo. Branch name should reference the issue (e.g. `42-resume-foreign-session`).
+4. **Open a PR** — use a [closing keyword](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue) in the PR body so the issue closes automatically on merge (`Closes #42` for same-repo, `Closes nevadoai/repo#42` for cross-repo).
+5. **Move to Done** — the board should auto-transition when the issue closes. Verify it did.
+
+If you get blocked, add the `blocked` label and leave a comment explaining what's blocking.
+
+### For Agents
+
+```bash
+# Assign yourself (use your GitHub username or the bot's)
+gh issue edit ISSUE_NUM --repo nevadoai/REPO_NAME --add-assignee "@me"
+
+# Move to In Progress on the board
+ITEM_ID=$(gh project item-list 1 --owner nevadoai --format json \
+  | jq -r '.items[] | select(.content.number == ISSUE_NUM and .content.repository == "nevadoai/REPO_NAME") | .id')
+gh project item-edit --project-id PVT_kwDODJ8T8s4Bd6rR --id "$ITEM_ID" \
+  --field-id PVTSSF_lADODJ8T8s4Bd6rRzhYYrnM --single-select-option-id 47fc9ee4
+
+# When done — move to Done
+gh project item-edit --project-id PVT_kwDODJ8T8s4Bd6rR --id "$ITEM_ID" \
+  --field-id PVTSSF_lADODJ8T8s4Bd6rRzhYYrnM --single-select-option-id 98236657
+```
 
 ---
 
@@ -123,12 +188,13 @@ This section describes how to work with this planning system programmatically.
      --label "initiative-label" \
      --body "## Context\n\n...\n\n## Acceptance Criteria\n\n- [ ] ..."
 
-   # Get both node IDs
-   EPIC_ID=$(gh api graphql -f query='{ repository(owner: "nevadoai", name: "nevado-planning") { issue(number: EPIC_NUM) { id } } }' --jq '.data.repository.issue.id')
-   SUB_ID=$(gh api graphql -f query='{ repository(owner: "nevadoai", name: "REPO_NAME") { issue(number: ISSUE_NUM) { id } } }' --jq '.data.repository.issue.id')
+   # Set issue type (Task, Bug, or Feature)
+   ISSUE_ID=$(gh api graphql -f query='{ repository(owner: "nevadoai", name: "REPO_NAME") { issue(number: ISSUE_NUM) { id } } }' --jq '.data.repository.issue.id')
+   gh api graphql -f query="mutation { updateIssue(input: { id: \"$ISSUE_ID\", issueTypeId: \"IT_kwDODJ8T8s4BmeAa\" }) { issue { issueType { name } } } }"
 
-   # Link sub-issue to epic
-   gh api graphql -f query="mutation { addSubIssue(input: { issueId: \"$EPIC_ID\", subIssueId: \"$SUB_ID\" }) { issue { id } } }"
+   # Get epic node ID and link sub-issue
+   EPIC_ID=$(gh api graphql -f query='{ repository(owner: "nevadoai", name: "nevado-planning") { issue(number: EPIC_NUM) { id } } }' --jq '.data.repository.issue.id')
+   gh api graphql -f query="mutation { addSubIssue(input: { issueId: \"$EPIC_ID\", subIssueId: \"$ISSUE_ID\" }) { issue { id } } }"
    ```
 
 3. **Add to Project Board:**
@@ -162,15 +228,33 @@ gh api repos/nevadoai/REPO_NAME/milestones \
 | Bug | `IT_kwDODJ8T8s4BmeAb` | Defects |
 | Feature | `IT_kwDODJ8T8s4BmeAc` | New capabilities |
 
-### Setting Priority on the Project Board
+### Setting Project Board Fields
+
+After adding an issue to the board, set its Priority and Target Quarter:
 
 ```bash
-# Get the project item ID after adding
-ITEM_ID=$(gh project item-list 1 --owner nevadoai --format json | jq -r '.items[] | select(.title == "Issue Title") | .id')
+# Get the project item ID
+ITEM_ID=$(gh project item-list 1 --owner nevadoai --format json \
+  | jq -r '.items[] | select(.title == "Issue Title") | .id')
 
-# Get the Priority field ID and option ID
-# Priority field and options can be queried from the project schema
-gh project field-list 1 --owner nevadoai --format json
+# Set Priority (field: PVTSSF_lADODJ8T8s4Bd6rRzhYYs9Q)
+# Options: P0=b6ff0f5f, P1=a1c6a391, P2=062ebd5f, P3=1221ae12
+gh project item-edit --project-id PVT_kwDODJ8T8s4Bd6rR --id "$ITEM_ID" \
+  --field-id PVTSSF_lADODJ8T8s4Bd6rRzhYYs9Q --single-select-option-id a1c6a391
+
+# Set Target Quarter (field: PVTSSF_lADODJ8T8s4Bd6rRzhYYtAo)
+# Options: Q3_2026=6c0d819b, Q4_2026=00935f23, Q1_2027=49d40e4d, Q2_2027=759e2fe1
+gh project item-edit --project-id PVT_kwDODJ8T8s4Bd6rR --id "$ITEM_ID" \
+  --field-id PVTSSF_lADODJ8T8s4Bd6rRzhYYtAo --single-select-option-id 6c0d819b
+```
+
+### Setting Status
+
+```bash
+# Status field: PVTSSF_lADODJ8T8s4Bd6rRzhYYrnM
+# Options: Todo=f75ad846, In_Progress=47fc9ee4, Done=98236657
+gh project item-edit --project-id PVT_kwDODJ8T8s4Bd6rR --id "$ITEM_ID" \
+  --field-id PVTSSF_lADODJ8T8s4Bd6rRzhYYrnM --single-select-option-id 47fc9ee4
 ```
 
 ### Checklist: Creating a New Initiative
@@ -183,3 +267,20 @@ gh project field-list 1 --owner nevadoai --format json
 - [ ] Link implementation issues as sub-issues of the epic
 - [ ] Add all issues to the Project board
 - [ ] Set Priority and Target Quarter on board items
+
+### Closing an Initiative
+
+When all sub-issues are done:
+
+1. **Close the epic** — close the issue in `nevado-planning`. The board auto-moves it to Done.
+2. **Close milestones** — close the matching milestone in each repo that had one.
+3. **Leave Target Quarter as-is** — it records when the work was scheduled, not when it finished.
+
+```bash
+# Close the epic
+gh issue close EPIC_NUM --repo nevadoai/nevado-planning
+
+# Close milestones in each repo
+gh api -X PATCH repos/nevadoai/REPO_NAME/milestones/MILESTONE_NUM \
+  -f state=closed
+```

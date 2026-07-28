@@ -12,18 +12,20 @@ See `README.md` for the full structure and agent workflow instructions.
 - Implementation issues go in their respective repos, not here
 - ADRs are append-only — never edit an accepted decision, write a new one that supersedes it
 
-## Key Commands
+## Planning System
 
-```bash
-# List epics
-gh issue list --repo nevadoai/nevado-planning
+See `README.md` for the full guide, including:
+- **"When to Use What"** — decision table for fields vs labels vs milestones
+- **"For Agents"** — complete CLI workflows with field IDs for the project board
 
-# List all open issues across the org
-gh issue list --repo nevadoai/nevado-planning --state open
+Key rules:
+- Priority lives on the project board field (P0–P3), not as labels
+- Milestones are per-initiative (not per-quarter)
+- Target Quarter is a project board field
+- Issue Type (Epic/Task/Bug/Feature) is the built-in org field, not a label
+- Every issue added to the board must have: Status, Priority, Milestone set
+- Labels are only for: size (`size:S/M/L`), initiative tags, and `blocked`
 
-# Add an issue to the project board
-gh project item-add 1 --owner nevadoai --url "https://github.com/nevadoai/REPO/issues/NUMBER"
+## Commands & Workflows
 
-# Link a sub-issue to an epic
-gh api graphql -f query='mutation { addSubIssue(input: { issueId: "EPIC_NODE_ID", subIssueId: "ISSUE_NODE_ID" }) { issue { id } } }'
-```
+All `gh` CLI workflows (creating epics, linking sub-issues, setting board fields, working on items) are in `README.md` under **"For Agents"** and **"Working on Items"**.
