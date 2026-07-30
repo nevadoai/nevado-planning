@@ -112,17 +112,17 @@ The [Nevado project board](https://github.com/orgs/nevadoai/projects/1) uses the
 | Labels | Built-in | See above | At creation; update if blocked |
 | Repository | Built-in | (auto) | Automatic |
 | Sub-issues progress | Built-in | (auto) | Automatic for epics with sub-issues |
-| Priority | Custom (single-select) | P0, P1, P2, P3 | Always; set at creation, reassess in triage |
+| Priority | Custom (single-select) | P0 - Urgent, P1 - High, P2 - Medium, P3 - Low | Always; set at creation, reassess in triage |
 | Target Quarter | Custom (single-select) | Q3 2026, Q4 2026, Q1 2027, Q2 2027 | When the work is scheduled |
 
 ### Priority Definitions
 
-| Level | Meaning | Response |
-|-------|---------|----------|
-| **P0** | System down / data loss / security | Drop everything, fix now |
-| **P1** | Major functionality broken or blocking others | This week |
-| **P2** | Important but not urgent | This quarter |
-| **P3** | Nice to have / tech debt | When capacity allows |
+| Level | UI Label | Meaning | Response |
+|-------|----------|---------|----------|
+| **P0** | Urgent | System down / data loss / security | Drop everything, fix now |
+| **P1** | High | Major functionality broken or blocking others | This week |
+| **P2** | Medium | Important but not urgent | This quarter |
+| **P3** | Low | Nice to have / tech debt | When capacity allows |
 
 ## Working on Items
 
@@ -238,7 +238,7 @@ ITEM_ID=$(gh project item-list 1 --owner nevadoai --format json \
   | jq -r '.items[] | select(.title == "Issue Title") | .id')
 
 # Set Priority (field: PVTSSF_lADODJ8T8s4Bd6rRzhYYs9Q)
-# Options: P0=b6ff0f5f, P1=a1c6a391, P2=062ebd5f, P3=1221ae12
+# Options: P0/Urgent=b6ff0f5f, P1/High=a1c6a391, P2/Medium=062ebd5f, P3/Low=1221ae12
 gh project item-edit --project-id PVT_kwDODJ8T8s4Bd6rR --id "$ITEM_ID" \
   --field-id PVTSSF_lADODJ8T8s4Bd6rRzhYYs9Q --single-select-option-id a1c6a391
 
