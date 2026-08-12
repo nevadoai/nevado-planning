@@ -67,7 +67,7 @@ Sessions started on any Sherpa surface (IDE, TUI, Web) can be resumed on any oth
 ## Key Design Decisions
 
 - **Push vs pull for messages:** Hybrid — metadata broadcast continuously, full transcript synced to S3, pulled on resume
-- **Workspace continuity:** Requires committed state (branch + SHA). Uncommitted changes are the user's responsibility.
+- **Workspace continuity:** Requires committed state (branch + SHA). Uncommitted changes are the user's responsibility. A3.9 closes on this basis; see [Git Worktree Isolation](git-worktree-isolation.md) (scheduled after this epic) for a follow-on that captures uncommitted state.
 - **Conflict resolution:** TBD — what happens if two surfaces try to resume the same session simultaneously?
 
 ## Work Items
