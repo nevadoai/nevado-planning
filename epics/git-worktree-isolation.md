@@ -20,7 +20,7 @@ A3.9 ("Workspace state handoff strategy," `sherpa-sdk#58`) will close using A3's
 
 Today, surfaces that operate directly on a developer's on-disk checkout (IDE, TUI local mode) share a single working directory per repo. Two concurrent sessions against the same repo — e.g., two VS Code windows, or an IDE session and a local TUI session — have no git-level separation: checkout, staged changes, and uncommitted edits collide in the same directory.
 
-Separately, the Runtime server (backing TUI remote and Command Center's embedded SherpaTUI) already isolates concurrent sessions, but via a full `git clone` per session (`design/runtime-native-sdlc.md`), not a worktree. This is heavier than necessary and doesn't share the local object store, which matters as concurrent session count grows past the current cap of 5.
+Separately, the Runtime server (backing TUI remote and Command Center's embedded SherpaTUI) already isolates concurrent sessions, but via a full `git clone` per session (`design/sdlc/runtime-native-sdlc.md`), not a worktree. This is heavier than necessary and doesn't share the local object store, which matters as concurrent session count grows past the current cap of 5.
 
 Neither mechanism produces something A3.9 can use for handoff: today, resuming a session on another surface only carries committed state (branch + SHA). Uncommitted work has no representation and is silently dropped.
 
