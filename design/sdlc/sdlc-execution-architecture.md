@@ -1,19 +1,32 @@
 # SDLC Execution Architecture — One Execution Model
 
-**Status:** Jeff's proposed direction, not yet aligned with Tyler. The core call — one execution architecture, not two — reverses assumptions baked into `agent-architecture-plan.md` and epics #34/#36/#37, all of which Tyler owns or authored. This doc is the artifact for that conversation, not a unilateral decision. It has gone through several substantial revisions as claims got checked against real repo state and corrected; treat every specific claim below as worth re-verifying before it's relied on, not as settled just because it's written down.
+**Status:** Aligned with Tyler as of 2026-09-01 — see "Decisions from Tyler" immediately below for the specific calls. The core reversal is accepted; a few specifics (final Layer 2 driver, ingress implementation detail) are still being worked out, but the direction is decided, not proposed. This doc has gone through several substantial revisions as claims got checked against real repo state and corrected; treat specific claims as worth re-verifying before relied on, not as settled just because written down.
 
 ## Contents
 
 | Section | What it covers | Status |
 |---|---|---|
-| [The decision](#the-decision) | One execution architecture for all SDLC roles, replacing the two-stack plan | Proposed |
+| [Decisions from Tyler](#decisions-from-tyler-2026-09-01) | The seven open questions this doc raised, answered | Decided 2026-09-01 |
+| [The decision](#the-decision) | One execution architecture for all SDLC roles, replacing the two-stack plan | **Decided** |
 | [Design principle: contracts at boundaries](#design-principle-contracts-at-boundaries-not-shared-schemas) | The versioned-contract rule applied at three boundaries in this design | Framing, not a decision point |
-| [Integration boundary: sessions plug into CC](#integration-boundary-sessions-plug-into-cc-they-dont-replace-it) | What Command Center keeps owning; what changes underneath it | Proposed |
-| [Layer 1: Execution backend](#layer-1-execution-backend) | Session-based execution, event delivery, machine-callable ingress | Design settled; ingress recommended, not built |
-| [Layer 2: Pipeline orchestration](#layer-2-pipeline-orchestration) | Lambda-evolves vs. Step Functions as the sequencing driver | Open — driver choice undecided |
+| [Integration boundary: sessions plug into CC](#integration-boundary-sessions-plug-into-cc-they-dont-replace-it) | What Command Center keeps owning; what changes underneath it | Decided |
+| [Layer 1: Execution backend](#layer-1-execution-backend) | Session-based execution, event delivery, machine-callable ingress | Design settled; ingress confirmed needed, mechanism not yet built |
+| [Layer 2: Pipeline orchestration](#layer-2-pipeline-orchestration) | Driver type (Lambda-style, not Step Functions) and language (Go) for the sequencing engine | Decided — driver type and language; JS migration scope still open |
 | [Gates: converging approval mechanisms](#gates-converging-the-sdlc-pipelines-approval-mechanisms) | One shared `PendingGate` primitive instead of three bespoke ones | Recommended |
-| [What this means for the epics](#what-this-means-for-the-epics) | Concrete rescoping of #34/#36/#37/#39 if this direction is accepted | Consequence of the decision |
-| [Open questions](#open-questions) | What's still unresolved, implementation-level not architectural | Tracking |
+| [What this means for the epics](#what-this-means-for-the-epics) | Concrete rescoping of #34/#36/#37/#39 | Confirmed — proceed |
+| [Open questions](#open-questions) | What's still unresolved, implementation-level not architectural | Mostly resolved |
+
+## Decisions from Tyler (2026-09-01)
+
+Discussed directly with Tyler. These answer the seven items raised in the PR description, and supersede the "not yet aligned" framing this doc carried before this point.
+
+1. **Core reversal — accepted.** Everything executes through the Sherpa runtime. One execution architecture, not two.
+2. **Step list — dynamic, confirmed.** The executor takes a list of steps (Planning, Engineering, QA, ...), matching what [`sdlc-step-contract.md`](sdlc-step-contract.md) already sketches. Tyler's read on Step Functions: likely too rigid for this — a Lambda-style step-list interpreter instead, now settled as a new Go executor rather than an evolution of the JS `agentDrivenOrchestrator`; see the Layer 2 section below.
+3. **Machine-callable ingress — confirmed necessary.** Lambda needs a safe, secure way to call the Sherpa runtime. The recommended shape below (API Gateway M2M + forward-only ALB rule) stands as the working plan pending implementation review.
+4. **Sequencing — not a concern.** Whether #39 lands before or after #36/#37's step-list work doesn't matter; build order isn't a blocker either way.
+5. **Runtime capacity — sufficient for now, monitor.** No immediate build-out required. Separately, a different effort is already underway to move the runtime onto Fargate — not for scaling, for easier containerized deployment. Worth watching for interaction with this design's current EC2-instance-specific assumptions (the ALB target group, `worker.ts`'s env-based config), but not something this doc needs to resolve now.
+6. **Step contract — confirmed direction, refine as needed.** `sdlc-step-contract.md` can evolve, but it needs to actually support what [`sdlc-ux.html`](sdlc-ux.html) shows — the sketch stops being purely illustrative and becomes a concrete check on whether the contract is sufficient.
+7. **Epics — confirmed rescopable.** #34/#36/#37/#39 can be rescoped per "What this means for the epics" below.
 
 ## The decision
 
@@ -43,7 +56,7 @@ This supersedes the execution-mechanism half of `agent-architecture-plan.md` (St
 |---|---|---|
 | Strands Agent on Lambda as the execution mechanism | **Yes** | Replaced by Sherpa sessions on the runtime. |
 | `CodingAgentAdapter` pluggable-backend interface | **Yes** | Already dead code (zero callers); the multi-backend idea (let a customer choose their coding engine) can still exist later as a session-config option, not a parallel execution stack. |
-| Task-scoped, stateless-per-invocation model (`docs/agent-architecture-plan.md:131,223`) | **Yes** | Directly contradicted — sessions are persistent (Session Handoff, #1). This is the one piece that needs an explicit "we're reversing this" conversation with Tyler, not just a rescope. |
+| Task-scoped, stateless-per-invocation model (`docs/agent-architecture-plan.md:131,223`) | **Yes** | Directly contradicted — sessions are persistent (Session Handoff, #1). This was the one piece that needed an explicit "we're reversing this" conversation with Tyler, not just a rescope — held 2026-09-01, see "Decisions from Tyler" above. |
 | 6-role taxonomy (Engineering, QA, DevOps, Documentation, Compliance, Director) | **No** | Still the right decomposition of *what* agents do. Survives as session personas/bootstrap configs. |
 | Per-agent S3 bootstrap/memory/skills pattern | **No, but needs re-homing** | The idea (persistent, curated, per-role knowledge) is sound and matches Session Handoff's direction. Needs to attach to session config/system-prompt loading instead of a Strands-Lambda-specific loader. |
 | Agent Director / dynamic routing intent ("Strands Graph pattern") | **Superseded as stated** | The routing problem is real (this is Layer 2), but the mechanism doesn't need to be Strands-specific once the thing being routed is sessions, not Lambda invocations. |
@@ -177,12 +190,14 @@ The runtime's current limits (single instance, opt-in per customer) are build-ou
 
 With execution unified, Layer 2's job shrinks to: sequence sessions, hold gates, persist state, expose status. It doesn't need to know anything role-specific — every step is "start a session with config X, wait for its result, decide what's next."
 
-Two viable drivers, independent of Layer 1:
+Two questions, not one — which driver type, and which language:
 
-- **Lambda**, evolving the existing `agentDrivenOrchestrator`, extracting its ~4,000-line imperative logic into a declarative step list stored per-tenant, satisfying #36/#37's "no engine change to add a step" requirement. `{stepId, sessionConfig, gate?, onFail}` is now sketched at field level in [`sdlc-step-contract.md`](sdlc-step-contract.md), applying the same contract-at-boundary idea.
-- **Step Functions Standard**, replacing the Lambda driver entirely — native `.waitForTaskToken` for human-review gates (zero cost while waiting, no held connection, same async-callback shape as Layer 1) *and* for session results, which also removes the need to design a queue-relay pattern for event delivery (see the Layer 1 diagram above); durable execution history as an audit trail; already deployed elsewhere in this infra (a Standard state machine already runs in production), so this isn't introducing an unfamiliar AWS service.
+- **Driver type: Lambda-style (event-driven, imperative), not Step Functions.** Tyler's concern with Step Functions stands: an ASL state machine risks being too rigid for a genuinely dynamic, per-tenant step list (#37's requirement) — encoding "insert/reorder/gate an arbitrary step" in a declarative graph is more constrained than an interpreter walking a `steps[]` array (`sdlc-step-contract.md`). Step Functions' human-gate/`.waitForTaskToken` advantages (noted in Layer 1 above) are a real tradeoff being given up, not an oversight.
+- **Language: Go, for the new work, starting now.** The graph executor, the loop-back payload mechanism, the merge/deploy classification, the commit/PR ownership split — none of this exists in `agentDrivenOrchestrator` today; it's new logic either way. Given the confirmed long-term direction is full Go, writing it once in Go beats writing it in JS now and porting later. Extends the already-existing `sdlc-manager` (`command-center/backend/go/internal/sdlc`) rather than growing the JS Lambda. `{stepId, sessionConfig, gate?, onFail}` is sketched at field level in [`sdlc-step-contract.md`](sdlc-step-contract.md), applying the same contract-at-boundary idea, independent of which language implements it.
 
 Both call the same Layer 1 session API the same way — this choice doesn't ripple back into Layer 1 at all, which is exactly why it was worth separating.
+
+**Open, not assumed away: migration of the existing JS logic.** `agentDrivenOrchestrator`'s ~4,000 lines carry real, hardened production behavior beyond step-sequencing — PR/comment lifecycle, webhook/poller interactions, DynamoDB writes built up over real use. "New work is Go" doesn't by itself answer how or when that existing surface gets replaced, or whether it runs alongside the new Go executor during a transition. Unscoped here.
 
 ## Gates: converging the SDLC pipeline's approval mechanisms
 
@@ -210,17 +225,19 @@ Real evidence on how this class of integration tends to go wrong, within these t
 
 ## What this means for the epics
 
+Confirmed with Tyler (2026-09-01) — epics can be rescoped as needed:
+
 - **#39 (Runtime-Native SDLC Sessions)** — scope grows from "the engineering step" to "the execution substrate for every SDLC role." Still Jeff's epic; the design-doc updates from v2 (async push, drop `CodingAgentAdapter`) still apply.
 - **#34 (DevOps Agent)** — rescope from "enhance `selfHealingAgent`" (a Strands Lambda) to "a DevOps-role session persona." The monitoring/detection logic can stay wherever it lives (CloudWatch, EventBridge rules); what changes is that *remediation* work dispatches as a session, not a Lambda invocation.
 - **#36 (PM-Triggered Autonomous SDLC)** — its 11 steps become session-config entries in the Layer 2 step list. Two currently-filed sub-issues (#557 QA step, #561 docs step) were scoped against the old imperative shape and should be re-checked once the step contract exists.
 - **#37 (Configurable SDLC)** — becomes materially easier: since every step is structurally the same (start a session, wait, branch on result), customer-level reordering/gating is a data change to the step list, not new engine logic.
-- **`agent-architecture-plan.md`** — needs a follow-up doc (Tyler, or jointly) that re-expresses the 6-role taxonomy and bootstrap/memory pattern on top of sessions. Worth being explicit that this is a reversal of its stated stateless-per-invocation decision, not just an implementation swap — that's the part that needs to be said out loud to Tyler, not discovered later.
+- **`agent-architecture-plan.md`** — still needs a follow-up doc (Tyler, or jointly) that re-expresses the 6-role taxonomy and bootstrap/memory pattern on top of sessions. The reversal itself has now been said out loud and agreed (see "Decisions from Tyler"); the follow-up doc is about re-expressing the taxonomy, not re-litigating the reversal.
 
 ## Open questions
 
-1. **Sequencing:** does #39 (make sessions the substrate for all roles) need to land before #36/#37's step-list work starts, or can the step list be built against today's SSM path and cut over later?
-2. **Layer 2 driver:** Lambda-evolves vs. Step Functions — what would tip this either way? (Team's Step Functions familiarity, migration cost of the existing DynamoDB cycle records, how soon #37's human-gate requirement needs to ship.)
-3. **Runtime capacity:** with QA/Docs/DevOps/Compliance sessions added to Engineering's load, what does the runtime need (instance sizing, concurrency cap, HA) before this can carry production SDLC volume, not just interactive sessions?
+1. ~~**Sequencing:** does #39 (make sessions the substrate for all roles) need to land before #36/#37's step-list work starts, or can the step list be built against today's SSM path and cut over later?~~ **Resolved — not a concern (Tyler, 2026-09-01).** Build order either way is fine.
+2. ~~**Layer 2 driver:** Lambda-style vs. Step Functions, and which language?~~ **Resolved.** Lambda-style, not Step Functions (Step Functions flagged as too rigid for a dynamic per-tenant step list). Language is Go, as new work extending `sdlc-manager` — not an evolution of the JS `agentDrivenOrchestrator`. See the Layer 2 section above. Still open: scope/timeline of migrating the existing JS orchestrator's PR-lifecycle logic.
+3. ~~**Runtime capacity:** with QA/Docs/DevOps/Compliance sessions added to Engineering's load, what does the runtime need (instance sizing, concurrency cap, HA) before this can carry production SDLC volume, not just interactive sessions?~~ **Resolved — sufficient for now, monitor (Tyler, 2026-09-01).** A separate effort is already moving the runtime toward Fargate (deployment ergonomics, not scaling) — worth tracking for interaction with this doc's EC2-specific assumptions, not a blocker.
 4. ~~**Bootstrap/memory portability:** does the existing S3 bootstrap/memory/skills loader get adapted to sessions, or rebuilt?~~ **Resolved, smaller than framed.** Memory loading isn't missing from the runtime and doesn't need adapting — `sherpa-sdk/packages/core/src/prompt-loader.ts`'s `loadSystemPrompt(config)` already reads `MEMORY.md` + daily notes from S3, and both the EC2 runtime (`worker.ts`) and TUI local mode already call it. The function takes a `prefix` per call; it isn't instance-scoped by design. The actual gap: `worker.ts` always passes the single instance-global `KB_PREFIX` env value instead of a per-session, role-derived prefix — a small fix to one call site, not a new subsystem. This gap is independent of the SDLC work — it's a general runtime limitation (no session, interactive or autonomous, can select its own knowledge context today), just one SDLC's per-role sessions happen to need fixed. Separately, `nevado-sherpa-ide` has its own duplicated implementation of the same MEMORY.md pattern rather than using the shared `sherpa-sdk` function — a minor consistency gap, not urgent, worth a note but not its own epic.
-5. **The Tyler conversation itself:** this doc proposes reversing a decision `agent-architecture-plan.md` made explicitly six months ago. That needs to be raised as exactly that — a reversal to agree on — not folded silently into epic rescoping.
-6. ~~**Machine-callable ingress (the Layer 1 prerequisite, above):** there's currently no working path for a Lambda (or any non-browser caller) to authenticate to the runtime — the ALB's Cognito listener is browser-only by design, and nothing else is wired. This blocks the "orchestrator starts a session via a runtime API call" step directly. A real solution needs to be chosen.~~ **Recommended, not yet built.** See "Machine-callable ingress: recommended solution" above — reuse `command_center_api`'s existing M2M resource server + `cognito_authorizer`, a new forward-only ALB rule, no VPC Link, no auth logic in the runtime app. Still needs the route/rule/M2M-client actually provisioned and wired end-to-end, and still needs Tyler's eyes along with everything else here.
+5. ~~**The Tyler conversation itself:** this doc proposes reversing a decision `agent-architecture-plan.md` made explicitly six months ago. That needs to be raised as exactly that — a reversal to agree on — not folded silently into epic rescoping.~~ **Done, 2026-09-01.** See "Decisions from Tyler" at the top of this doc.
+6. ~~**Machine-callable ingress (the Layer 1 prerequisite, above):** there's currently no working path for a Lambda (or any non-browser caller) to authenticate to the runtime — the ALB's Cognito listener is browser-only by design, and nothing else is wired. This blocks the "orchestrator starts a session via a runtime API call" step directly. A real solution needs to be chosen.~~ **Confirmed necessary (Tyler, 2026-09-01); mechanism recommended, not yet built.** See "Machine-callable ingress: recommended solution" above — reuse `command_center_api`'s existing M2M resource server + `cognito_authorizer`, a new forward-only ALB rule, no VPC Link, no auth logic in the runtime app. Still needs the route/rule/M2M-client actually provisioned and wired end-to-end.
