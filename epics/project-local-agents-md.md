@@ -55,26 +55,48 @@ Three surfaces, two mechanisms.
 - **`nevado-sherpa-tui`** — both `apps/tui` and `apps/runtime` wrap `loadSystemPrompt` and
   currently discard the `ctx` that carries the workspace root. Each forwards
   `ctx.workspaceRoot`, but only for sessions actually bound to a checkout.
-- **`nevado-sherpa-ide`** — independent implementation; the fix is reordering the candidate
-  chain to prefer `AGENTS.md` over the vendor-specific files above it.
+- **`nevado-sherpa-ide`** — independent implementation, needing two unrelated changes:
+  reordering the candidate chain to prefer `AGENTS.md` over the vendor-specific files above it,
+  and switching project instructions from appended to replacing, per the decision below. The
+  first is a bug; the second is behavioral alignment. Neither depends on the other.
 
 ## Sequence
 
 1. SDK capability — self-contained, ships first.
 2. TUI + runtime adoption — blocked on (1) and an SDK version bump.
-3. IDE reorder — independent of both; can run in parallel.
+3. IDE candidate ordering — independent of both; can run in parallel.
+4. IDE append → replace — independent of (1)–(3), and the last piece needed before the same
+   `AGENTS.md` behaves the same way on every surface.
 
-## Open questions
+## Decisions
 
-- **Append or replace?** The SDK will *replace* the shared instructions with the local file;
-  the IDE *appends* the local file beneath them (`promptLoader.ts:625-634`), so the Command
-  Center persona is still loaded there. Same file, different behavior depending on which
-  surface you are in. Needs a decision before the two converge.
-- **Duplicated S3 transport.** The IDE's `promptLoader.ts` (806 lines) imports nothing from
-  `@nevadoai/sherpa-core` and reimplements `readS3File`, `loadSkills`, and the bootstrap keys.
-  Per-surface *assembly* is intentional — `agent-runner.ts:105-112` names the IDE's pipeline as
-  the reason `loadPrompt` is a port — but the transport beneath it is duplicated and has
-  drifted. A consolidation opportunity, not scoped here.
+**Project instructions replace knowledge-base instructions, on every surface.**
+
+Appending does not solve the problem this initiative exists for. The knowledge-base content is
+written for the client accounts our tools run in; layering a project file beneath it still
+loads the Command Center persona, which is the thing a developer building the tooling is
+trying to get away from. A project that states its own instructions is stating them *instead
+of* the org's, not in addition to them.
+
+Precisely: a project-local instructions file replaces everything sourced from the knowledge
+base — instructions, personality, tool descriptions, memory, skills. Content that is already
+local is unaffected: the IDE's workspace intelligence and session plans are not knowledge-base
+content and continue to compose as they do today.
+
+Consequence: the IDE currently appends (`promptLoader.ts:625-634`) and has to change. That is
+a separate change from the candidate-ordering bug and is tracked on its own; the ordering fix
+stands alone and does not depend on it.
+
+**The duplicated S3 transport is out of scope for this initiative.**
+
+The IDE's `promptLoader.ts` (806 lines) imports nothing from `@nevadoai/sherpa-core` and
+reimplements `readS3File`, `loadSkills`, and the bootstrap keys. Per-surface *assembly* is
+intentional — `agent-runner.ts:105-112` names the IDE's pipeline as the reason `loadPrompt` is
+a port — but the transport beneath it is duplicated and has drifted.
+
+Consolidating it is the right direction and is tracked separately. It stays out of this
+initiative deliberately: it is a refactor with no user-visible change, and gating a small
+behavioral fix behind a large structural one would delay the thing developers actually need.
 
 ## Scope boundary
 
