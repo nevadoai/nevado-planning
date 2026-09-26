@@ -327,9 +327,11 @@ This is a future extension — the core architecture supports it because the run
 
 ## Repos Affected
 
-| Repo | Changes |
+**Superseded — see the table at the top of this document.** None of the `sherpa-sdk` rows happened, and the runtime row describes a WebSocket channel that was replaced by SQS. Retained to show what was proposed; `nevadoai/nevado-sherpa-tui` was written here as `agent-workflow`, a local clone directory name, which is the error that made a later revision of the spec conclude the repository did not exist.
+
+| Repo | Proposed changes (not what shipped) |
 |---|---|
-| `sherpa-sdk` | Protocol types: `pauseReason`, `completionResult`, `sdlc` config on session. `reportCompletion` tool spec. SDLC WS event types. |
-| `sherpa-sdk` (core) | `AgentEngine`: set `pauseReason` at each exit. Handle `reportCompletion` tool (set result, exit loop). |
-| `agent-workflow` | Runtime: SDLC WS channel. Accept `sdlc` config in `POST /sessions`. Auto-approve for SDLC sessions. Emit tool events + completion on SDLC channel. |
-| `command-center` | Orchestrator: `POST /sessions` to start. WS client for SDLC channel. Write activities to DynamoDB. Handle completion/failure. Feature flag. |
+| `nevadoai/sherpa-sdk` | Protocol types: `pauseReason`, `completionResult`, `sdlc` config on session. `reportCompletion` tool spec. SDLC WS event types. — **Not done.** Built in the runtime against unchanged 4.0.1. |
+| `nevadoai/sherpa-sdk` (core) | `AgentEngine`: set `pauseReason` at each exit. Handle `reportCompletion` tool (set result, exit loop). — **Not done.** The pause reason already existed per turn; it travels on the published `sessionEnd` event. |
+| `nevadoai/nevado-sherpa-tui` | Runtime: SDLC WS channel. Accept `sdlc` config in `POST /sessions`. Auto-approve for SDLC sessions. Emit tool events + completion on SDLC channel. — **Shipped differently:** `/v1/sdlc/*` as its own plugin, a `profile` rather than an `sdlc` config, and SQS instead of a WS channel. |
+| `nevadoai/command-center` | Orchestrator: `POST /sessions` to start. WS client for SDLC channel. Write activities to DynamoDB. Handle completion/failure. Feature flag. — **Shipped with an SQS consumer** in place of the WS client; the rest holds. |
