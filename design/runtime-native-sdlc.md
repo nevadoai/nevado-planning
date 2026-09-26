@@ -1,5 +1,24 @@
 # Runtime-Native SDLC Sessions
 
+## Implemented — and six decisions below were superseded
+
+**Read this section before the rest of the document.** The migration was built and merged as of 2026-09-26 (35 PRs across `nevadoai/command-center` and `nevadoai/nevado-sherpa-tui`). The sections below are the original proposal and six of their decisions did not survive implementation. Where this section and the text below disagree, **this section is what shipped.**
+
+The authoritative detail is in `sdlc-runtime-execution-architecture.md` (decisions) and `sdlc-runtime-impl-spec-part1-foundation.md` / `…-part2-cutover.md` (code facts), all in this directory.
+
+| Proposed below | What shipped |
+|---|---|
+| **An SDLC WebSocket channel** at `/v1/workspace/ws/sdlc`, with sequence numbers and reconnect replay | **SQS FIFO.** The runtime publishes through a `setObserver` hook on the existing `Broadcaster`: `messageGroupId = sessionId`, a per-envelope UUID dedup id, a `v: 1` envelope, and an opaque `correlation` (`applicationId`/`cycleId`/`stage`) the runtime never interprets. A Go consumer drains it. There is no SDLC WebSocket, and nothing long-lived survives in the machine path. |
+| A route under `/v1/workspace` | **`/v1/sdlc/*`**, its own encapsulated plugin with its own authorization hook, so the machine surface is separately routable at the ALB and the hook cannot leak onto human routes. |
+| `sdlc` config plus `systemPrompt` override on `POST /sessions` | A **`profile`** on `POST /v1/sdlc/sessions` carrying `tools`, `maxTurns` and `instructions`. |
+| **`reportCompletion`** as the terminal tool | **Three** terminal tools — `submitPlan`, `submitReview`, `reportCompletion` — with **exactly one granted per session**, derived from `profile.tools`. Omitting the list grants none, which is fail-closed and was itself a shipped defect (`command-center#810`). |
+| **SDK changes** (`pauseReason`, `completionResult`, protocol types, engine exit paths) as sub-issue 1, with a dependency chain `sherpa-sdk → runtime → command-center` | **No SDK change.** Authorised, then declined on merit. `'completed'` is a human complete/archive flag; emitting it from the engine loop would break `nevado-sherpa-ide`'s `/resume`, which filters on `listByStatus('paused')`. And no session status distinguishes a session that finished having submitted a result from one that finished having submitted nothing — delivery is not a lifecycle state. The pause reason travels on the published `sessionEnd` event instead. The dependency chain does not exist. |
+| "**The agent does not commit or push**"; the runtime commits after `reportCompletion` | **The agent commits and pushes.** `reportCompletion` then *verifies* it from git: it reads `pushedSha` from `refs/remotes/origin/<branch>` and refuses the call unless it equals `headSha`, naming both. It derives `branch`, `commitSha` and `filesModified` from git rather than accepting them as arguments. |
+
+**Also settled, and previously listed as open items:** the working branch is derived as `cycle/<cycleNumber>` from the cycle sort key at approve-dispatch — the `cycle/**` prefix is a wire constraint, because the CI workflow the provisioner writes into every customer repo triggers on nothing else. `maxTurns` is carried per session on the profile. Authentication is a bearer token the runtime verifies itself, with mTLS retained as an inactive `sdlc_ingress_mode`; mTLS was declined on **cost**, not feasibility.
+
+**Verification state.** Code-level verification is complete across all 35 PRs, with mutation testing on every Go change. One local end-to-end run proved dispatch → session → commit → push → git-verified completion. **No cycle has run on AWS.** The runtime is deployed; the ingress is not durable until `command-center#858` is fixed, because `sdlc_ingress_mode` is persisted nowhere and every merge to `develop` reverts it. Only **human-approved** cycles reach the Go path — PM auto-approval still routes through the JavaScript gate and its stub dispatcher.
+
 ## Context
 
 SDLC (automated coding cycles) in Command Center originally used a bespoke execution path:
