@@ -1,6 +1,6 @@
 # Git Worktree Isolation
 
-**Epic:** TBD (create in `nevado-planning`)
+**Epic:** [#41](https://github.com/nevadoai/nevado-planning/issues/41)
 **Milestone:** Git Worktree Isolation
 **Initiative:** TBD (follows A3 — see Dependencies)
 
@@ -26,7 +26,26 @@ Neither mechanism produces something A3.9 can use for handoff: today, resuming a
 
 ## Decisions
 
+### Two jobs: provisioning vs isolation
+
+This epic covers **two different jobs**. Keeping them distinct is what makes the trigger model below coherent — read this first.
+
+| | **Provisioning** | **Isolation** |
+|---|---|---|
+| Question it answers | Where do this session's files come from? | How do I get off a checkout other sessions share? |
+| Applies to | Server-managed workspaces (Runtime) | User-owned workspaces (IDE, TUI local, a future local Command Center) |
+| Trigger | **Automatic**, at session creation | **On-demand only** — never forced, never auto-detected |
+| Why | There is no shared checkout to protect; each session already got its own full clone, and a worktree merely makes that copy cheaper | A single on-disk checkout is shared, so moving off it is a deliberate act with a name |
+
+The split is by **who owns the workspace** — not by surface, and not by local-vs-remote transport. A future *local* Command Center is user-owned and therefore gets the full isolation surface; the Runtime does not, because nothing there is shared.
+
+**Consequence:** automatic per-session worktrees on the Runtime (`nevado-sherpa-tui#77`) are **provisioning, not isolation**, and are therefore *not* an exception to "never forced, never auto-detected" below. Nothing there is being isolated *from* anything. The rule below governs isolation only.
+
+**Gating is by capability, never by client.** Which commands a surface offers is decided by capabilities the **backend reports** (`sherpa-sdk#254`), not by a hardcoded surface or client name. The Runtime reports worktree list/remove but **not** isolate; a user-owned backend reports isolate. This is why a web UI pointed at a *local* backend correctly offers `/worktree`, while the same UI pointed at the Runtime does not.
+
 ### Trigger model
+
+> Scope: this section governs **isolation** on user-owned workspaces. Automatic provisioning on server-managed workspaces is covered above and is deliberately not subject to the "on-demand" rule.
 
 - **Resume → always automatic, no user choice.** Resuming a session always uses its worktree. If the original worktree was pruned (see Open Questions — Lifecycle, still unresolved), resume recreates it via `git worktree add` against the session's known branch name — branches survive worktree removal, so this is a plain re-add, not a special case.
 - **New work → on-demand, never forced, never auto-detected.** No collision detection — a user's/agent's request is the only trigger. New work has no existing branch to anchor to, so starting it requires a name (often a ticket reference — Jira, Linear, etc.) that becomes the worktree's branch identifier. Two ways to trigger it:
@@ -54,11 +73,15 @@ Two flat commands, not a subcommand family — deliberately rejected a `/cycle`-
 - **Everything else falls to a lazy sweep.** Window close, crash, `kill -9` — none give a reliable "session ended" signal to intercept. Rather than chase that, a lazy sweep (run whenever something else relevant happens, e.g. a new worktree is requested for the same repo) prunes worktrees that are clean and orphaned. Dirty-and-orphaned worktrees are left alone and flagged for attention. Refining cleanup for the crash/kill case specifically is explicitly not a priority right now.
 - **`/new` is a no-op for worktrees.** Starting a fresh session doesn't quit anything, so there's nothing to reconcile — the previous worktree just isn't the *current* one anymore, still intact, still checkable later via `/exit` or the lazy sweep. Treating it like quit would mean removing a worktree (a real git op) and then needing to relocate the session's CWD somewhere — the obvious fallback, the repo root, is exactly the shared/unisolated state this epic exists to avoid, which would mean un-isolating a session at the moment it starts fresh work. The two commands simply compose instead: `/new` to start fresh, then `/worktree new-feature-work` if/when that work should be isolated.
 
+> **Server-managed workspaces don't use this lifecycle.** The above is the **isolation** lifecycle, for worktrees a user asked for on their own checkout. A Runtime session's worktree is **provisioned** with the session and torn down with it (`nevado-sherpa-tui#77`), gated on unpushed/dirty work. Because that gate is deliberately refusable, a blocked teardown or a crashed runtime leaves a worktree behind **by design** — so those leftovers need their own surface (`nevado-sherpa-tui#123`), not the lazy sweep.
+
 ### Runtime workspace sync
 
 - **One shared repo copy per app, worktrees carved from it** — replaces today's full-clone-per-session. Created lazily on first session.
 - **Fetch as late as practically possible** — right before a worktree's base ref is chosen, not at session start, to minimize (not eliminate) staleness.
 - **Accepted limitation, not solved:** if an agent explores for a while before deciding to isolate, the shared copy can still be stale relative to the remote by the time a worktree is actually created. This is inherent to any fetch-then-use-later approach — no fetch timing eliminates it. Not chasing a fix for this now.
+
+> **Fetch timing under automatic provisioning.** "As late as practically possible" was written against the isolation model, where worktree creation happens an arbitrary time after session start. Under automatic provisioning the base ref is chosen **at** session creation, so "as late as possible" and "at session start" collapse into the same moment — the rule is unchanged, but on this path it means the fetch is effectively eager. The staleness limitation above therefore mostly disappears for provisioning (the tree is created from a just-fetched ref), and is traded for per-session-creation fetch latency against the shared mirror. Mirror refresh must be concurrency-safe — see `nevado-sherpa-tui#77`.
 
 ### Branch collisions
 
@@ -119,14 +142,23 @@ Git refuses to check out a branch in a worktree if that branch is already checke
 ## Scope
 
 **In scope:**
-- Worktree-per-session isolation on local surfaces (IDE, TUI local mode)
-- Worktree-per-session on the Runtime server, replacing full-clone-per-session
-- Automatic worktree use on session resume (recreated if pruned)
+
+*Isolation — user-owned workspaces (IDE, TUI local mode), on-demand only:*
+- Worktree isolation on local surfaces, so concurrent sessions never share git state
 - On-demand worktree creation for new work — human-invoked command and agent-invoked tool, both requiring a name/identifier for the new branch
 - Ask-vs-always-allow permission setting for agent-initiated worktree creation
 - Uncommitted-diff stash/reapply flow so isolating mid-session carries in-progress work into the new worktree
+
+*Provisioning — server-managed workspaces (Runtime), automatic:*
+- **Automatic worktree-per-session on the Runtime server at session creation, replacing full-clone-per-session.** This is in scope *as automatic behaviour* and is not an exception to the on-demand trigger model — see "Two jobs" under Decisions. The Runtime does not offer isolation, because no checkout there is shared.
+- A bare mirror per application, created and refreshed from the repo URL, with worktrees carved from it
+- Cleanup of a session's worktree at session end, gated on unpushed/dirty work — and a surface for the leftovers that gate deliberately preserves (`nevado-sherpa-tui#123`)
+
+*Both:*
+- Automatic worktree use on session resume (recreated if pruned)
 - Dynamic default-branch detection (never hardcoded `main`), basing new worktrees on a freshly-fetched `origin/<default>`
 - Worktree state (branch + uncommitted diff) exposed in a form the `sherpa-sdk` protocol can carry, for same-machine consumers only
+- Command availability driven by **backend-reported capabilities** (`sherpa-sdk#254`), never by a hardcoded client or surface name
 
 **Deliberately not building:**
 - Dedicated worktree UI in Command Center or IDE. A live session's worktree status isn't decision-relevant (whoever's in the session already knows what they've changed) — the only case with real decision value is an orphaned, dirty worktree needing keep-or-discard, and that's already covered by `/worktree-list` (see Command shape) wherever a Sherpa command surface runs — including Command Center's own embedded terminal (`@nevadoai/sherpa-web`), which reaches Runtime-hosted worktrees that would otherwise be unreachable from any local surface. Worktrees stay tooling, not a native CC/IDE view. Revisit only if a concrete glanceable-without-a-terminal need shows up later.
@@ -142,19 +174,39 @@ Git refuses to check out a branch in a worktree if that branch is already checke
 
 None remaining — trigger model, lifecycle (including `/new`), Runtime workspace sync, the cross-boundary warning, and UI depth are all resolved. See Decisions and Scope above.
 
-## Work Items (draft — not yet filed)
+## Work Items
+
+All work items are filed and linked as sub-issues of [#41](https://github.com/nevadoai/nevado-planning/issues/41). State as of 2026-10-03.
+
+*Done:*
+
+| Work Item | Issue | Notes |
+|-----------|-------|-------|
+| Worktree management primitives (create/list/remove) | `sherpa-sdk#170` | Core logic + protocol types for session-to-worktree mapping |
+| Default-branch detection + fetch-based base | `sherpa-sdk#171` | Resolve `origin/HEAD`/GitHub `defaultBranchRef` dynamically |
+| Uncommitted-diff stash/reapply on isolate | `sherpa-sdk#172` | Mid-session move; surfaces unpushed-commit state explicitly |
+| Resume-recreates-worktree logic | `sherpa-sdk#173` | Re-add via known branch name if pruned; branch-collision messaging |
+| Gitignore an in-repo parent dir via consent | `sherpa-sdk#234` | Follow-up |
+| Single service call for create-session → isolate | `sherpa-sdk#238` | Follow-up; the service-boundary shape |
+| `confirmAlways` on remove | `sherpa-sdk#241` | Every removal confirmed at removal time |
+| Bare-repo layouts (`isBare`, shared anchor) | `sherpa-sdk#242` | Follow-up |
+| Remove a deleted-but-registered worktree | `sherpa-sdk#243` | Follow-up; `isOrphaned` |
+
+*Open:*
+
+| Work Item | Issue | Notes |
+|-----------|-------|-------|
+| `/worktree` + `/worktree-list` command (IDE + TUI) | `sherpa-sdk#174` | Flat commands; TUI half shipped in `nevado-sherpa-tui#115` |
+| Runtime: bare-repo + worktree-per-session | `nevado-sherpa-tui#77` | **Provisioning.** Replaces the `POST /v1/workspace/sessions` full-clone path. Mirror creation/refresh from a URL is the one piece no component owns yet — resolve ownership before starting |
+| Runtime: list/remove orphaned worktrees + capabilities endpoint | `nevado-sherpa-tui#123` | The surface for leftovers the dirty gate preserves; serves `GET /v1/workspace/capabilities` |
+| Gate commands on backend-reported capabilities | `sherpa-sdk#254` | Replaces client-label gating on every surface |
+| Agent worktree tool + system prompt guidance | `sherpa-sdk#250` | Story 3; isolation only, capability-gated |
+| Ask-vs-always-allow permission setting | `sherpa-sdk#251` | Story 4; isolation only |
+| `/exit` dirty check + lazy sweep | `sherpa-sdk#252` | Lifecycle; isolation side |
+| Uncommitted diff as restorable session state | `sherpa-sdk#253` | Story 10; same-machine only |
+
+*Not yet filed:*
 
 | Work Item | Repo | Notes |
 |-----------|------|-------|
-| Worktree management primitives (create/list/remove) | `sherpa-sdk` | Core logic + protocol types for session-to-worktree mapping |
-| Default-branch detection + fetch-based base | `sherpa-sdk` | Resolve `origin/HEAD`/GitHub `defaultBranchRef` dynamically; base new worktrees on a fresh `origin/<default>` |
-| Uncommitted-diff stash/reapply on isolate | `sherpa-sdk` | Mid-session move into a worktree; surfaces unpushed-commit state explicitly |
-| Resume-recreates-worktree logic | `sherpa-sdk` | Re-add via known branch name if the worktree was pruned |
-| Branch-collision detection + messaging | `sherpa-sdk` | Replace git's raw error with a clear message + suggested fix (resume existing worktree, or rename, or switch root) |
-| `/worktree <name>` command | `sherpa-sdk` (`sherpa-commands`) | Flat command, required name argument; no new parsing infra needed |
-| `/worktree-list` interactive command | `nevado-sherpa-tui` (+ `sherpa-commands` for registration) | Navigable list + inline remove action; folds in status/remove; TUI component reuse unconfirmed — verify before scoping as cheap |
-| Agent worktree tool + system prompt guidance | `sherpa-sdk` | Agent-invoked path; ties into ask/always-allow permission setting |
-| Ask-vs-always-allow permission setting | `sherpa-sdk` + surfaces | Protocol/setting in SDK; each surface implements the confirmation prompt |
-| Local TUI worktree integration | `nevado-sherpa-tui` | Local mode uses worktree management primitives |
-| IDE worktree integration (multi-window isolation) | `nevado-sherpa-ide` | New-session and resume paths use worktree management primitives |
-| Runtime server: bare-repo + worktree-per-session | `nevado-sherpa-tui` | Replaces `POST /v1/workspace/sessions` full-clone path |
+| IDE worktree integration (multi-window isolation) | `nevado-sherpa-ide` | New-session and resume paths use the worktree primitives. Story 1's local half |
