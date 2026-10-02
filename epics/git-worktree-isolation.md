@@ -172,9 +172,7 @@ Git refuses to check out a branch in a worktree if that branch is already checke
 
 ## Open Questions
 
-Trigger model, lifecycle (including `/new`), Runtime workspace sync, the cross-boundary warning, and UI depth are all resolved — see Decisions and Scope above.
-
-**One open:** whether **user-owned** workspaces should also isolate by default, rather than on-demand — [#71](https://github.com/nevadoai/nevado-planning/issues/71). Decision D settled the server-managed half (automatic provisioning); this is the remaining half. A local trade-off analysis exists (`design/worktree-by-default-tradeoffs.md`, branch `analysis/worktree-by-default-tradeoffs`, kept local by direction). Blocks nothing, but `sherpa-sdk#250` / `#251` should ideally wait on it, since by-default would orphan the ask-vs-always-allow knob.
+None remaining — trigger model, lifecycle (including `/new`), Runtime workspace sync, the cross-boundary warning, and UI depth are all resolved. See Decisions and Scope above.
 
 ## Work Items
 
