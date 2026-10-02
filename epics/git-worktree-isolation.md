@@ -198,8 +198,9 @@ All work items are filed and linked as sub-issues of [#41](https://github.com/ne
 |-----------|-------|-------|
 | `/worktree` + `/worktree-list` command (IDE + TUI) | `sherpa-sdk#174` | Flat commands; TUI half shipped in `nevado-sherpa-tui#115` |
 | Runtime: bare-repo + worktree-per-session | `nevado-sherpa-tui#77` | **Provisioning.** Replaces the `POST /v1/workspace/sessions` full-clone path. Mirror creation/refresh from a URL is the one piece no component owns yet — resolve ownership before starting |
-| Runtime: list/remove orphaned worktrees + capabilities endpoint | `nevado-sherpa-tui#123` | The surface for leftovers the dirty gate preserves; serves `GET /v1/workspace/capabilities` |
+| Runtime: list/remove orphaned worktrees + capabilities endpoint | `nevado-sherpa-tui#123` | Runtime routes only; serves `GET /v1/workspace/capabilities`. The surface for leftovers the dirty gate preserves |
 | Gate commands on backend-reported capabilities | `sherpa-sdk#254` | Replaces client-label gating on every surface |
+| Web: `WorktreeCommandIO` adapter + consent wiring | `sherpa-sdk#255` | The browser client for the above. The shared command impl is already UI-agnostic, but the web has no `SessionManager`, so it needs an HTTP-backed adapter |
 | Agent worktree tool + system prompt guidance | `sherpa-sdk#250` | Story 3; isolation only, capability-gated |
 | Ask-vs-always-allow permission setting | `sherpa-sdk#251` | Story 4; isolation only |
 | `/exit` dirty check + lazy sweep | `sherpa-sdk#252` | Lifecycle; isolation side |
