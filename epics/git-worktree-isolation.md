@@ -90,6 +90,27 @@ Git refuses to check out a branch in a worktree if that branch is already checke
 - **Branch already checked out in another worktree** — that worktree is effectively an active/orphaned session for that same branch. Surface its location and suggest resuming/reusing it instead of creating a duplicate.
 - **Branch already checked out at the repo's root** (the user's plain, non-worktree checkout) — surface that the root is currently on that branch, and suggest either picking a different name for the new worktree or switching the root checkout first.
 
+### Naming is an input; ownership is a record
+
+A branch's **name** and the question of **who may delete it** are different axes, and conflating them is a live defect (`sherpa-sdk#257`, `sherpa-sdk#259`). Today the SDK's only ownership signal is the `sherpa/` **name prefix**, which gives a surface two options and neither is what the autonomous path needs: name it `sherpa/*` and the SDK deletes it even if the surface only *attached* it, or name it anything else and the SDK **never** deletes it.
+
+**The rule: a surface chooses the branch name and passes it to the SDK; the SDK creates and names the branch.** There is no state in which the SDK does not know the name of a branch its session is working on. Only the SDK can do all five of create / record / place / resume / reap, so all five stay there; the surface's single genuine concern is the *name*.
+
+Consequences:
+
+- **The prefix heuristic is demoted to a fallback, not removed** (`sherpa-sdk#257` option (a)). A recorded verdict (`worktreeBranchOwner: 'sdk' | 'caller'`) decides deletion; when absent, behaviour falls back to today's prefix test, so the change is purely additive with no migration.
+- **`'sdk'` means "the SDK created this ref and will destroy it" — not "the SDK chose the name."** A caller-supplied `cycle/12` that the SDK creates is `'sdk'`-owned. That is the whole point of splitting the axes.
+- **Discovering a branch's name after the fact is rejected.** An earlier design had the surface *declare* a name once its agent had already run `git checkout -b`. That legitimises a third party creating refs behind the SDK's back, leaves a crash window between creation and declaration, and would not have fixed the leak it was named for. Reading HEAD back is kept, but demoted from *discovery* to a **divergence guard**: a mismatch against the handed name is a contract violation, not new information.
+- **Deterministic names collide on purpose.** A name like `cycle/12` is predictable — that is the feature — so a retry or crash-recovery routinely finds the ref already present. An existing-ref policy is therefore mandatory, not polish: our own leftover ⇒ reuse/reset; a foreign ref ⇒ blocked with a reason, never a silent attach.
+
+### The per-session mirror is a security boundary, not only an isolation one
+
+Verified with real git: **a worktree has no private config and no private hooks.** From inside a worktree of a bare repo, `git config --local <k> <v>` writes to the **shared bare repo's** `config` (no `config.worktree` exists unless `extensions.worktreeConfig` is set), and `git rev-parse --git-path hooks` resolves to the **bare repo's** `hooks/`. A credential helper written into the bare mirror's config **is** invoked from the worktree.
+
+So the per-session mirror is not merely about branch namespacing (worktrees of one repo also share a single `refs/heads/*`, so a branch can be checked out in at most one worktree and a name survives teardown). It is what keeps one session's **credential token** and **commit identity** out of every other session's worktree. A shared per-repo mirror would share **one credential helper and one commit identity** across every session on that repo — session A's commits attributable to session B's author and pushed with B's token.
+
+**Any object-sharing optimisation must therefore use `git clone --reference`** (shared objects, private refs *and* private config), **never a shared mirror directory.** This also means a leaked mirror strands a credential helper pointing at a token path, not just disk — a second, independent reason the SDK must reap what it creates.
+
 ## User Stories
 
 | # | Story |
@@ -153,12 +174,14 @@ Git refuses to check out a branch in a worktree if that branch is already checke
 - **Automatic worktree-per-session on the Runtime server at session creation, replacing full-clone-per-session.** This is in scope *as automatic behaviour* and is not an exception to the on-demand trigger model — see "Two jobs" under Decisions. The Runtime does not offer isolation, because no checkout there is shared.
 - A bare mirror per application, created and refreshed from the repo URL, with worktrees carved from it
 - Cleanup of a session's worktree at session end, gated on unpushed/dirty work — and a surface for the leftovers that gate deliberately preserves (`nevado-sherpa-tui#123`)
+- **Cleanup covers every ref the SDK created for the session** — not only the worktree, and not only the ref the worktree currently happens to be on. A session that moves off its provisioned branch must not strand it (`sherpa-sdk#259`), and the unpushed/dirty gate must account for every ref in scope, not just one
 
 *Both:*
 - Automatic worktree use on session resume (recreated if pruned)
 - Dynamic default-branch detection (never hardcoded `main`), basing new worktrees on a freshly-fetched `origin/<default>`
 - Worktree state (branch + uncommitted diff) exposed in a form the `sherpa-sdk` protocol can carry, for same-machine consumers only
 - Command availability driven by **backend-reported capabilities** (`sherpa-sdk#254`), never by a hardcoded client or surface name
+- **Surfaces supply the branch name** (or accept the SDK default `sherpa/<name>`); the SDK **creates, places, resumes and reaps** it. Cleanup is driven by a **recorded ownership verdict, never a name prefix** — see "Naming is an input; ownership is a record" under Decisions (`sherpa-sdk#257`)
 
 **Deliberately not building:**
 - Dedicated worktree UI in Command Center or IDE. A live session's worktree status isn't decision-relevant (whoever's in the session already knows what they've changed) — the only case with real decision value is an orphaned, dirty worktree needing keep-or-discard, and that's already covered by `/worktree-list` (see Command shape) wherever a Sherpa command surface runs — including Command Center's own embedded terminal (`@nevadoai/sherpa-web`), which reaches Runtime-hosted worktrees that would otherwise be unreachable from any local surface. Worktrees stay tooling, not a native CC/IDE view. Revisit only if a concrete glanceable-without-a-terminal need shows up later.
@@ -176,7 +199,7 @@ None remaining — trigger model, lifecycle (including `/new`), Runtime workspac
 
 ## Work Items
 
-All work items are filed and linked as sub-issues of [#41](https://github.com/nevadoai/nevado-planning/issues/41). State as of 2026-10-03.
+Filed work items are linked as sub-issues of [#41](https://github.com/nevadoai/nevado-planning/issues/41) — 23 as of 2026-10-05 (11 closed, 12 open). The *Not yet filed* table below is the exception to that; everything in the *Done* and *Open* tables is filed and linked. State as of 2026-10-05.
 
 *Done:*
 
@@ -185,7 +208,7 @@ All work items are filed and linked as sub-issues of [#41](https://github.com/ne
 | Worktree management primitives (create/list/remove) | `sherpa-sdk#170` | Core logic + protocol types for session-to-worktree mapping |
 | Default-branch detection + fetch-based base | `sherpa-sdk#171` | Resolve `origin/HEAD`/GitHub `defaultBranchRef` dynamically |
 | Uncommitted-diff stash/reapply on isolate | `sherpa-sdk#172` | Mid-session move; surfaces unpushed-commit state explicitly |
-| Resume-recreates-worktree logic | `sherpa-sdk#173` | Re-add via known branch name if pruned; branch-collision messaging |
+| Resume-recreates-worktree logic | `sherpa-sdk#173` | Re-add via known branch name if pruned; branch-collision messaging. **Collision *messaging* shipped; collision *prevention* via reaping did not** — see `sherpa-sdk#259`. Also note resume is **prefix-bound**: `worktreePathForBranch` returns `null` for any branch outside `sherpa/*` (confirmed in `sherpa-core@4.3.0`), so resume does not work for caller-named refs at all today (`sherpa-sdk#257`) |
 | Gitignore an in-repo parent dir via consent | `sherpa-sdk#234` | Follow-up |
 | Single service call for create-session → isolate | `sherpa-sdk#238` | Follow-up; the service-boundary shape |
 | `confirmAlways` on remove | `sherpa-sdk#241` | Every removal confirmed at removal time |
@@ -198,12 +221,14 @@ All work items are filed and linked as sub-issues of [#41](https://github.com/ne
 |-----------|-------|-------|
 | `/worktree` + `/worktree-list` command (IDE + TUI) | `sherpa-sdk#174` | Flat commands; TUI half shipped in `nevado-sherpa-tui#115` |
 | Runtime: bare-repo + worktree-per-session | `nevado-sherpa-tui#77` | **Provisioning.** Replaces the `POST /v1/workspace/sessions` full-clone path. Mirror creation/refresh from a URL is the one piece no component owns yet — resolve ownership before starting |
-| Runtime: list/remove orphaned worktrees + capabilities endpoint | `nevado-sherpa-tui#123` | The surface for leftovers the dirty gate preserves; serves `GET /v1/workspace/capabilities` |
+| Runtime: list/remove orphaned worktrees + capabilities endpoint | `nevado-sherpa-tui#123` | The surface for leftovers the dirty gate preserves; serves `GET /v1/workspace/capabilities`. **Natural home for reaping orphaned branches and mirrors too** — depends on `sherpa-sdk#259`/`#257` for the ownership verdict; note an orphaned mirror now also strands a credential helper, not just disk |
 | Gate commands on backend-reported capabilities | `sherpa-sdk#254` | Replaces client-label gating on every surface |
 | Agent worktree tool + system prompt guidance | `sherpa-sdk#250` | Story 3; isolation only, capability-gated |
 | Ask-vs-always-allow permission setting | `sherpa-sdk#251` | Story 4; isolation only |
 | `/exit` dirty check + lazy sweep | `sherpa-sdk#252` | Lifecycle; isolation side |
 | Uncommitted diff as restorable session state | `sherpa-sdk#253` | Story 10; same-machine only |
+| Teardown reaps the branch union, not just the live worktree's HEAD | `sherpa-sdk#259` | **Bug, reproduced** under `nevado-sherpa-tui#77`: teardown reads the live worktree's HEAD with `??` rather than a union, so the SDK leaks its **own** `sherpa/*` branch once the session checks out another ref — wedging re-provision of the same session id against a reused mirror. No protocol change; ships first and independently of `#257` |
+| Caller-named, SDK-owned worktree branches | `sherpa-sdk#257` | `newBranch`/`owned` + recorded ownership verdict, an existing-ref policy for deterministic names, and resume for caller-named refs. Establishes "naming is an input, ownership is a record" (see Decisions). Needs **cross-team ratification with Command Center**, which currently embeds the branch name in `instructions` prose; the consumer half is a `workBranch` field on `POST /sdlc/sessions` in `nevado-sherpa-tui` |
 
 *Not yet filed:*
 
