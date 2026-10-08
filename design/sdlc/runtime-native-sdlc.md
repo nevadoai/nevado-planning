@@ -1,5 +1,12 @@
 # Runtime-Native SDLC Sessions
 
+**Status:** Partially superseded by [`sdlc-execution-architecture.md`](sdlc-execution-architecture.md) — read that doc first for current direction. Two things changed there:
+
+1. **Scope broadens beyond Engineering.** This doc was written for the engineering execution step alone. The session mechanics below (session mode fields, `reportCompletion`, `pauseReason`, tool allowlist principle) apply unchanged to every SDLC role (QA, Documentation, DevOps, Compliance) — only the "Context," "Why Migrate," and code samples below still talk Engineering-only.
+2. **The event-delivery mechanism is superseded.** The SDLC WS channel design here has the orchestrator connect and hold a WebSocket open, with an SQS-self-message-and-replay workaround for Lambda's timeout (Architecture diagram, Sequence diagram, "Listening for Events," and Decision #2 below). That's replaced by an async-push design — the orchestrator starts a session and exits; the runtime publishes events to a queue that triggers short, per-event invocations. See `sdlc-execution-architecture.md`'s "Layer 1: Execution backend" section for the corrected diagrams and rationale. The event *payload shapes* below (`toolActivity`, `completion`, `committed`, `failed`) are unaffected — only how they're delivered changes.
+
+Also: "Starting a Session" below shows a bare `fetch()` call. Dispatch should go through `agentDrivenOrchestrator/agentRouter.js` / `agentInterface.js` — the live seam already used for `nevado | cursor | copilot` — not through `backend/common/codingAgentAdapter.js`, which has zero callers anywhere in the codebase despite defining a pluggable-backend interface. Register the runtime there as a new backend option instead of building fresh dispatch logic.
+
 ## Context
 
 SDLC (automated coding cycles) in Command Center originally used a bespoke execution path:
@@ -39,10 +46,13 @@ This design migrates SDLC execution to the runtime, enabling:
 
 ## Architecture
 
+**Superseded — see `sdlc-execution-architecture.md`'s Layer 1 diagrams for the current version.** Kept here for history; the "Connect to SDLC WS channel" / held-connection step below is what changed.
+
 ```mermaid
 flowchart TB
     subgraph "CC Backend"
-        ORCH[Orchestrator Lambda<br/>SQS-triggered, up to 15 min]
+        ORCH[Orchestrator Lambda<br/>starts session, exits — holds nothing]
+        EVQ[SQS / EventBridge<br/>event delivery]
     end
 
     subgraph "EC2 Instance"
@@ -57,9 +67,9 @@ flowchart TB
     DDB[(DynamoDB: cycles)]
 
     ORCH -->|"1. POST /sessions (SDLC mode)"| RT
-    ORCH -->|"2. Connect to SDLC WS channel"| RT
     RT --> AE
-    AE -->|"tool events + completion"| ORCH
+    AE -->|"tool events + completion (published)"| EVQ
+    EVQ -->|"invoke per event, short-lived"| ORCH
     ORCH -->|"write activities + result"| DDB
     UI -->|"poll"| DDB
 ```
@@ -69,30 +79,29 @@ flowchart TB
 ```mermaid
 sequenceDiagram
     participant UI as CC Frontend
-    participant SQS as SQS
+    participant SQS as SQS (trigger)
     participant Orch as Orchestrator Lambda
     participant RT as Runtime
+    participant EVQ as SQS / EventBridge (events)
     participant DDB as DynamoDB
 
     UI->>SQS: User approves plan
     SQS->>Orch: Trigger
     Orch->>RT: POST /v1/workspace/sessions (SDLC mode)
     RT-->>Orch: { sessionId }
-    Orch->>RT: Connect /v1/workspace/ws/sdlc, subscribe to sessionId
+    Note over Orch: Invocation ends — holds nothing open
 
     loop Agent executing
-        RT-->>Orch: toolActivity {seq, tool, summary}
+        RT->>EVQ: publish toolActivity {seq, tool, summary}
+        EVQ->>Orch: invoke (short-lived, one event, exits)
         Orch->>DDB: Write activity entry (batched as needed)
     end
 
-    Note over Orch: Approaching Lambda timeout?
-    Orch->>SQS: Send reconnect message {sessionId, cycleId, lastSeq}
-    SQS->>Orch: New invocation
-    Orch->>RT: Reconnect WS, replay from lastSeq
-
-    RT-->>Orch: completion {seq, success, summary, filesModified}
+    RT->>EVQ: publish completion {seq, success, summary, filesModified}
+    EVQ->>Orch: invoke
     Orch->>RT: Commit (message) + push
-    RT-->>Orch: committed {seq, commitSha, branchName}
+    RT->>EVQ: publish committed {seq, commitSha, branchName}
+    EVQ->>Orch: invoke
     Orch->>DDB: Update cycle: engineeringResult, status
     Orch->>Orch: routeAfterEngineering() (PR, QA, deploy)
 
@@ -125,14 +134,14 @@ When `sdlc` is present:
 
 **Note:** The exact tool allowlist/blocklist for SDLC sessions needs to be defined during implementation. The principle is: include execution tools (file ops, shell, search, sub-agents) + `reportCompletion`, exclude anything that expects human interaction or is only meaningful in an interactive context.
 
-### SDLC WebSocket Channel
+### SDLC event vocabulary
 
-A dedicated WS endpoint (or subscription mode) that emits only tool-level events:
+**Delivery mechanism superseded — payload shapes below still apply.** Originally specified as a dedicated WS endpoint the orchestrator connects to and holds open. Superseded by async push: the runtime publishes these same event shapes to a queue (SQS/EventBridge), which triggers a short-lived consumer per event. See `sdlc-execution-architecture.md`. This is also the contract-at-boundary described there — the runtime only ever emits this generic vocabulary, with no knowledge of CC's cycle/activity table shape.
 
 ```typescript
 // Tool activity event
 {
-  seq: number;           // monotonically increasing, for reconnect replay
+  seq: number;           // monotonically increasing, for ordering/dedup under at-least-once delivery
   type: 'toolActivity';
   sessionId: string;
   tool: string;          // 'writeFile', 'editFile', 'runCommand', etc.
@@ -250,7 +259,7 @@ const { sessionId } = await response.json();
 
 ### Listening for Events
 
-The orchestrator connects to the SDLC WS channel and:
+**Superseded mechanism — see note at top of doc.** The orchestrator no longer connects to a WS channel; a short-lived invocation is triggered per event delivered via the queue, and:
 - Receives `toolActivity` events → decides how to batch/summarize → writes `activities[]` to DynamoDB
 - Receives `completion` event → maps to `engineeringResult` → proceeds to next stage
 - Receives `failed` event → sets cycle status to FAILED
@@ -290,9 +299,9 @@ This is a future extension — the core architecture supports it because the run
 
 1. **SDLC WS endpoint** — Separate path (`/v1/workspace/ws/sdlc`). The interactive WS streams everything (token-by-token text, all events). SDLC consumers need a fundamentally different event set. Separate path keeps the contract clean.
 
-2. **SDLC WS events include a sequence number** — Each event has a monotonically increasing `seq: number`. If the Lambda needs to reconnect (approaching timeout), it sends an SQS message to itself with `{ sessionId, cycleId, lastSeq }`. The new invocation reconnects and replays from that sequence. Gap between invocations is seconds — well within the buffer.
+2. **~~SDLC WS events include a sequence number... reconnect via SQS self-message~~ — superseded.** Original decision: hold a WS connection open, and when Lambda approaches its timeout, send itself an SQS message with `{ sessionId, cycleId, lastSeq }` to reconnect and replay. Replaced: events are published to a queue (SQS/EventBridge) and delivered to short, per-event invocations — no invocation ever holds a connection long enough to approach the timeout, so there's nothing to reconnect. The `seq` number is kept, but now for ordering/dedup under at-least-once delivery rather than replay-on-reconnect. See `sdlc-execution-architecture.md`, "Layer 1: Execution backend," for the full comparison and the reasoning for keeping SQS as an event-delivery transport rather than removing it.
 
-3. **Concurrency** — Runtime caps concurrent sessions at 5 (env `MAX_CONCURRENT_SESSIONS`). When hit, new sessions queue (FIFO wait, no rejection). Not a limitation at current scale. If contention arises: bump cap, priority queue, or reserve slots.
+3. **Concurrency** — Runtime caps concurrent sessions at 5 (env `MAX_CONCURRENT_SESSIONS`; deployed config currently allows more — verify actual value before relying on either number). When hit, new sessions queue (FIFO wait, no rejection). Was "not a limitation at current scale" when this only covered Engineering; re-check once QA/Documentation/DevOps/Compliance sessions add load under the broadened scope (`sdlc-execution-architecture.md` open question 3). If contention arises: bump cap, priority queue, or reserve slots.
 
 4. **Runaway prevention** — `AgentEngine` has a 200 LLM roundtrip cap per `engine.run()` invocation. For SDLC (one prompt, one run), this is the effective session limit. Hasn't been a problem (SSM runner only used 40), but should be configurable via session creation so SDLC can raise or remove it if needed.
 

@@ -2,7 +2,7 @@
 
 **Epic:** [nevado-planning#TBD](https://github.com/nevadoai/nevado-planning/issues/TBD)
 **Milestone:** Runtime-Native SDLC
-**Design Doc:** [design/runtime-native-sdlc.md](../design/runtime-native-sdlc.md)
+**Design Doc:** [design/sdlc/runtime-native-sdlc.md](../design/sdlc/runtime-native-sdlc.md)
 
 ## Goal
 

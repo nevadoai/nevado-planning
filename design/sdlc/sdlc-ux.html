@@ -1,0 +1,562 @@
+<title>Cycle Console</title>
+
+<style>
+  :root {
+    --bg: #eef0f3;
+    --surface: #ffffff;
+    --surface-alt: #f6f7f9;
+    --border: #dcdfe5;
+    --border-soft: #e6e8ec;
+    --text: #1b1e24;
+    --text-muted: #5a6170;
+    --text-faint: #8a90a0;
+    --accent: #6a4d9c;
+
+    --running: #2f6fed;
+    --complete: #1c8f5a;
+    --gate: #a8710a;
+    --failed: #c1423f;
+    --queued: #8a90a0;
+
+    --font-ui: ui-sans-serif, "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+    --radius-sm: 5px;
+    --radius-md: 10px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1116;
+      --surface: #171a21;
+      --surface-alt: #1d212a;
+      --border: #2b303b;
+      --border-soft: #262b35;
+      --text: #e9ebf1;
+      --text-muted: #9aa1b1;
+      --text-faint: #656c7c;
+      --accent: #b39ce0;
+
+      --running: #6b93ff;
+      --complete: #3ecb8a;
+      --gate: #e3ab45;
+      --failed: #ef6b68;
+      --queued: #656c7c;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #0f1116;
+    --surface: #171a21;
+    --surface-alt: #1d212a;
+    --border: #2b303b;
+    --border-soft: #262b35;
+    --text: #e9ebf1;
+    --text-muted: #9aa1b1;
+    --text-faint: #656c7c;
+    --accent: #b39ce0;
+
+    --running: #6b93ff;
+    --complete: #3ecb8a;
+    --gate: #e3ab45;
+    --failed: #ef6b68;
+    --queued: #656c7c;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 15px;
+    line-height: 1.5;
+    margin: 0;
+    padding: 28px 20px 64px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--accent); }
+
+  .page {
+    max-width: 1040px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  /* ---- banner ---- */
+  .banner {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    padding: 11px 16px;
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+    border: 1px solid var(--border-soft);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-sm);
+    font-size: 12.5px;
+    color: var(--text-muted);
+  }
+  .banner strong { color: var(--text); font-weight: 600; }
+  .banner code {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    background: var(--surface-alt);
+    border: 1px solid var(--border-soft);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  /* ---- header ---- */
+  .run-header {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .run-title {
+    font-size: 22px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .run-title .app-name { color: var(--text-muted); font-weight: 500; }
+  .run-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    font-size: 12.5px;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .run-meta span b { color: var(--text-muted); font-family: var(--font-ui); font-weight: 600; }
+
+  /* ---- rail ---- */
+  .rail-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 22px 20px 18px;
+    overflow-x: auto;
+  }
+  .rail {
+    display: flex;
+    align-items: flex-start;
+    min-width: 640px;
+  }
+  .rail-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 78px;
+    position: relative;
+  }
+  .rail-connector {
+    flex: 0.6;
+    height: 2px;
+    background: var(--border);
+    margin-top: 17px;
+    position: relative;
+    top: 0;
+  }
+  .rail-connector.done { background: var(--complete); }
+
+  .node-dot {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 700;
+    border: 2px solid var(--border);
+    background: var(--surface);
+    color: var(--text-faint);
+  }
+  .node-dot.done { border-color: var(--complete); color: var(--complete); background: color-mix(in srgb, var(--complete) 12%, var(--surface)); }
+  .node-dot.active {
+    border-color: var(--gate);
+    color: var(--gate);
+    background: color-mix(in srgb, var(--gate) 14%, var(--surface));
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--gate) 18%, transparent);
+    animation: pulse 2.2s ease-in-out infinite;
+  }
+  .node-dot.queued { color: var(--text-faint); }
+
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--gate) 18%, transparent); }
+    50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--gate) 8%, transparent); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .node-dot.active { animation: none; }
+  }
+
+  .node-label {
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+  }
+  .node-label.queued, .node-sub.queued { color: var(--text-faint); font-weight: 500; }
+  .node-sub {
+    font-size: 10.5px;
+    font-family: var(--font-mono);
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---- layout grid ---- */
+  .grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.55fr) minmax(260px, 1fr);
+    gap: 20px;
+  }
+  @media (max-width: 720px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 18px 18px 16px;
+  }
+  .card-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    margin: 0 0 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .card-title .count {
+    font-family: var(--font-mono);
+    font-weight: 500;
+    color: var(--text-faint);
+    font-size: 12px;
+  }
+
+  /* ---- activity feed ---- */
+  .feed {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    max-height: 420px;
+    overflow-y: auto;
+  }
+  .feed-row {
+    display: grid;
+    grid-template-columns: 62px 66px 1fr;
+    gap: 10px;
+    align-items: baseline;
+    padding: 7px 4px;
+    border-bottom: 1px solid var(--border-soft);
+    font-size: 12.5px;
+  }
+  .feed-row:last-child { border-bottom: none; }
+  .feed-time {
+    font-family: var(--font-mono);
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .role-tag {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    padding: 1px 6px;
+    border-radius: 4px;
+    width: fit-content;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+  }
+  .feed-text { color: var(--text); }
+  .feed-text .cmd { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+  .feed-text .result { color: var(--complete); font-weight: 600; }
+
+  /* ---- gate card ---- */
+  .gate-card {
+    border-color: color-mix(in srgb, var(--gate) 45%, var(--border));
+  }
+  .gate-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--gate);
+    background: color-mix(in srgb, var(--gate) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--gate) 35%, transparent);
+    padding: 3px 9px 3px 7px;
+    border-radius: 999px;
+    margin-bottom: 10px;
+  }
+  .gate-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--gate);
+  }
+  .gate-q { font-size: 13.5px; margin: 0 0 4px; font-weight: 600; }
+  .gate-meta {
+    font-size: 12px;
+    color: var(--text-faint);
+    margin: 0 0 14px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .gate-actions { display: flex; gap: 8px; }
+
+  .btn {
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 7px 13px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface-alt);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .btn:hover { border-color: var(--text-faint); }
+  .btn.primary {
+    background: var(--gate);
+    border-color: var(--gate);
+    color: #fff;
+  }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn:focus-visible, a:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* ---- session map ---- */
+  .session-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+  .session-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12.5px;
+  }
+  .session-role {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 11px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+  .session-name { flex: 1; color: var(--text); }
+  .status-pill {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+  .status-pill.complete { color: var(--complete); background: color-mix(in srgb, var(--complete) 14%, transparent); }
+  .status-pill.queued { color: var(--text-faint); background: color-mix(in srgb, var(--queued) 14%, transparent); }
+  .status-pill.blocked { color: var(--gate); background: color-mix(in srgb, var(--gate) 14%, transparent); }
+
+  .divider { height: 1px; background: var(--border-soft); margin: 14px 0; }
+
+  .footnote {
+    font-size: 12px;
+    color: var(--text-faint);
+    text-align: center;
+    padding-top: 8px;
+  }
+</style>
+
+<div class="page">
+
+  <div class="banner">
+    <span>🧭</span>
+    <span><strong>Illustrative sketch, not a committed design.</strong> Built to test whether the proposed contract — step introspection, role-attributed events, generic gate state — is enough to render a view like this. See <code>sdlc-execution-architecture.md</code>.</span>
+  </div>
+
+  <div class="run-header">
+    <div class="eyebrow">Command Center · Cycle Detail</div>
+    <div class="run-title"><span class="app-name">checkout-service /</span> Add idempotency key support to POST /orders</div>
+    <div class="run-meta">
+      <span><b>Cycle</b> cyc_4f81a2</span>
+      <span><b>Started</b> 09:07:14</span>
+      <span><b>Elapsed</b> 42m</span>
+      <span><b>Iteration</b> 1 of 5</span>
+    </div>
+  </div>
+
+  <div class="rail-card">
+    <div class="rail">
+      <div class="rail-node">
+        <div class="node-dot done">✓</div>
+        <div class="node-label">Plan</div>
+        <div class="node-sub">3m</div>
+      </div>
+      <div class="rail-connector done"></div>
+
+      <div class="rail-node">
+        <div class="node-dot done">E</div>
+        <div class="node-label">Engineering</div>
+        <div class="node-sub">14m</div>
+      </div>
+      <div class="rail-connector done"></div>
+
+      <div class="rail-node">
+        <div class="node-dot done">Q</div>
+        <div class="node-label">QA</div>
+        <div class="node-sub">6m · 42/42</div>
+      </div>
+      <div class="rail-connector done"></div>
+
+      <div class="rail-node">
+        <div class="node-dot active">!</div>
+        <div class="node-label">PR Review</div>
+        <div class="node-sub">waiting 8m</div>
+      </div>
+      <div class="rail-connector"></div>
+
+      <div class="rail-node">
+        <div class="node-dot queued">D</div>
+        <div class="node-label queued">Documentation</div>
+        <div class="node-sub queued">queued</div>
+      </div>
+      <div class="rail-connector"></div>
+
+      <div class="rail-node">
+        <div class="node-dot queued">O</div>
+        <div class="node-label queued">DevOps</div>
+        <div class="node-sub queued">queued</div>
+      </div>
+      <div class="rail-connector"></div>
+
+      <div class="rail-node">
+        <div class="node-dot queued">C</div>
+        <div class="node-label queued">Compliance</div>
+        <div class="node-sub queued">queued</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-title">Activity <span class="count">17 events</span></div>
+      <div class="feed">
+        <div class="feed-row">
+          <span class="feed-time">09:14:02</span>
+          <span class="role-tag">eng</span>
+          <span class="feed-text"><span class="cmd">editFile</span> src/orders/idempotency.ts</span>
+        </div>
+        <div class="feed-row">
+          <span class="feed-time">09:14:47</span>
+          <span class="role-tag">eng</span>
+          <span class="feed-text"><span class="cmd">editFile</span> src/orders/orders.controller.ts</span>
+        </div>
+        <div class="feed-row">
+          <span class="feed-time">09:18:21</span>
+          <span class="role-tag">eng</span>
+          <span class="feed-text"><span class="cmd">runCommand</span> npm test — <span class="result">28 passed</span></span>
+        </div>
+        <div class="feed-row">
+          <span class="feed-time">09:21:04</span>
+          <span class="role-tag">eng</span>
+          <span class="feed-text">session complete → handoff to QA</span>
+        </div>
+        <div class="feed-row">
+          <span class="feed-time">09:21:10</span>
+          <span class="role-tag">qa</span>
+          <span class="feed-text"><span class="cmd">writeFile</span> tests/idempotency.spec.ts</span>
+        </div>
+        <div class="feed-row">
+          <span class="feed-time">09:24:55</span>
+          <span class="role-tag">qa</span>
+          <span class="feed-text"><span class="cmd">runCommand</span> npm run test:e2e — <span class="result">42 passed</span></span>
+        </div>
+        <div class="feed-row">
+          <span class="feed-time">09:27:02</span>
+          <span class="role-tag">qa</span>
+          <span class="feed-text">session complete → PR opened #1842</span>
+        </div>
+        <div class="feed-row">
+          <span class="feed-time">09:27:09</span>
+          <span class="role-tag">layer2</span>
+          <span class="feed-text">gate opened — <b>PR Review</b> via Slack (#checkout-eng)</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:20px;">
+      <div class="card gate-card">
+        <span class="gate-status"><span class="gate-dot"></span>Pending gate</span>
+        <p class="gate-q">Approve PR #1842 to continue the run</p>
+        <div class="gate-meta">
+          <span>channel: slack</span>
+          <span>waiting: 8m</span>
+          <span>timeout: 4h</span>
+        </div>
+        <div class="gate-actions">
+          <button class="btn primary">Approve</button>
+          <button class="btn">Request changes</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Sessions</div>
+        <div class="session-list">
+          <div class="session-row">
+            <span class="session-role">E</span>
+            <span class="session-name">Engineering</span>
+            <span class="status-pill complete">Done</span>
+          </div>
+          <div class="session-row">
+            <span class="session-role">Q</span>
+            <span class="session-name">QA</span>
+            <span class="status-pill complete">Done</span>
+          </div>
+          <div class="session-row">
+            <span class="session-role">D</span>
+            <span class="session-name">Documentation</span>
+            <span class="status-pill blocked">Blocked</span>
+          </div>
+          <div class="session-row">
+            <span class="session-role">O</span>
+            <span class="session-name">DevOps</span>
+            <span class="status-pill queued">Queued</span>
+          </div>
+          <div class="session-row">
+            <span class="session-role">C</span>
+            <span class="session-name">Compliance</span>
+            <span class="status-pill queued">Queued</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footnote">Mock data · exercises role-attributed events, step introspection, and a channel-agnostic gate read — the UI itself is not a proposal.</div>
+
+</div>
